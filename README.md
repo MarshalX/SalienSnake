@@ -17,6 +17,13 @@ Arguments:
 * **-l, --list-planets** - Print list with planet names and IDs
 * **--language** - Language (english, russian, etc.)
 
+Examples:
+```
+python3 SalienSnake.py --token nizqvw1sd9d4gf2nwecrg5n26e1zl80l
+python3 SalienSnake.py --token 6ibdq3baf21w1xca1x5gtgx2iwez6mn1 --planet 1
+python3 SalienSnake.py --token h0s07sgjfhzhe19fxri1cf9fofm8ubqv --list-planets
+```
+
 ## Multi-account
 ```
 python3 SalienSnake.py [--file <filename with extension>]
@@ -29,6 +36,11 @@ Example of file with tokens:
 nizqvw1sd9d4gf2nwecrg5n26e1zl80l
 6ibdq3baf21w1xca1x5gtgx2iwez6mn1
 h0s07sgjfhzhe19fxri1cf9fofm8ubqv
+```
+
+Example use:
+```
+python3 SalienSnake.py --file tokens.txt
 ```
 
 # License
