@@ -16,10 +16,10 @@ logFormatter = logging.Formatter(
 )
 logger = logging.getLogger('saliengame')
 
-consoleHandler = logging.StreamHandler()
-consoleHandler.setFormatter(logFormatter)
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logFormatter)
 
-logger.addHandler(consoleHandler)
+logger.addHandler(console_handler)
 logger.setLevel(logging.INFO)
 
 
@@ -29,7 +29,7 @@ class Salien(Thread):
 
         self.name = name
         self.planet = planet
-        self.API = Steam_API(token, language)
+        self.API = SteamApi(token, language)
         self.player = self.API.get_player_info()
 
     def info(self, msg):
@@ -37,6 +37,21 @@ class Salien(Thread):
 
     def warning(self, msg):
         logger.warning('{} {}'.format(self.name, msg))
+
+    def find_new_planet(self):
+        new_planets = self.API.get_planets()
+        for new_planet in new_planets['response']['planets']:
+            if not new_planet['state']['captured']:
+                self.info('Planet #{} - {} ({}%) seems nice, joining there!'.format(
+                    new_planet['id'], new_planet['state']['name'], int(new_planet['state']['capture_progress'] * 100)
+                ))
+
+                self.planet = new_planet['id']
+
+                self.API.join_planet(self.planet)
+                self.info('Joined planet #{}'.format(self.planet))
+
+                break
 
     def run(self):
         self.info('Current score = {}/{}; Current Level = {}'.format(
@@ -46,34 +61,24 @@ class Salien(Thread):
         ))
 
         if not self.planet:
-            self.planet = self.player['response']['active_planet']
-
-        self.API.join_planet(self.planet)
-        self.info('Joined planet #{}'.format(self.planet))
+            if 'active_planet' in self.player['response']:
+                self.planet = self.player['response']['active_planet']
+            else:
+                self.find_new_planet()
 
         while True:
             planet_info = self.API.get_planet(self.planet)
             zone = None
 
-            for zone in planet_info['response']['planets'][0]['zones']:
-                if not zone['captured']:
-                    zone = zone
-                    break
-
-            if zone is None:
-                self.info(self.name + ' There are no free zones. Finding a new planet!')
-
-                planets = self.API.get_planets()
-                for planet in planets['response']['planets']:
-                    if planet['state']['captureprogress'] < 1:
-                        self.info('Planet #{} - {} ({}%) seems nice, joining there!'.format(
-                            planet['id'],
-                            planet['state']['name'],
-                            int(planet['state']['capture_progress'] * 100)
-                        ))
-
-                        planet = planet['id']
+            if 'planets' in planet_info['response']:
+                for zone_item in planet_info['response']['planets'][0]['zones']:
+                    if not zone_item['captured'] and (not zone or zone['difficulty'] < zone_item['difficulty']):
+                        zone = zone_item
                         break
+
+            if not zone:
+                self.info('Finding a new planet!')
+                self.find_new_planet()
 
             time.sleep(random.randint(5, 10))
 
@@ -83,9 +88,9 @@ class Salien(Thread):
             time.sleep(125)
 
             difficulty_scores = {
-                '1': '595',
-                '2': '1190',
-                '3': '2380'
+                1: '595',
+                2: '1190',
+                3: '2380'
             }
             score = difficulty_scores.get(zone['difficulty'], 120)
 
@@ -101,7 +106,7 @@ class Salien(Thread):
                 self.warning('API. ReportScore. Request sent too early.')
 
 
-class Steam_API:
+class SteamApi:
     headers = {
         'Accept': '*/*',
         'Origin': 'https://steamcommunity.com',
@@ -234,23 +239,24 @@ if __name__ == '__main__':
                 token = token.replace('\n', '')
                 name = 'Account #{}'.format(number)
 
+                if len(token) != 32:
+                    logger.warning('Token on {} line is invalid, it should be 32 characters long!'.format(number + 1))
+                    exit()
+
                 temp_thread = Salien(token, name)
                 temp_thread.start()
 
                 logger.info('Thread \'{}\' has started!'.format(name))
     else:
         if args.list_planets:
-            API = Steam_API(language=args.language)
+            API = SteamApi(language=args.language)
 
             planets = API.get_planets()
             for planet in planets['response']['planets']:
-                logger.info(
-                    '{}: {} ({}%)'.format(
-                        planet['id'],
-                        planet['state']['name'],
-                        int(planet['state']['capture_progress'] * 100)
-                    )
-                )
+                logger.info('{}: {} ({}%)'.format(
+                    planet['id'], planet['state']['name'],
+                    int(planet['state']['capture_progress'] * 100)
+                ))
 
         if not args.token:
             logger.warning(
