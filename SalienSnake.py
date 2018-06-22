@@ -12,7 +12,8 @@ import logging
 from threading import Thread
 
 logFormatter = logging.Formatter(
-    '%(filename)12s[LINE:%(lineno)3d]# %(levelname)-8s [%(asctime)s]  %(message)s'
+    '%(levelname)-5s [%(asctime)s] %(message)s',
+    datefmt='%H:%M:%S'
 )
 logger = logging.getLogger('saliengame')
 
@@ -46,12 +47,7 @@ class Salien(Thread):
                     new_planet['id'], new_planet['state']['name'], int(new_planet['state']['capture_progress'] * 100)
                 ))
 
-                self.planet = new_planet['id']
-
-                self.API.join_planet(self.planet)
-                self.info('Joined planet #{}'.format(self.planet))
-
-                break
+                return new_planet['id']
 
     def run(self):
         self.info('Current score = {}/{}; Current Level = {}'.format(
@@ -64,7 +60,10 @@ class Salien(Thread):
             if 'active_planet' in self.player['response']:
                 self.planet = self.player['response']['active_planet']
             else:
-                self.find_new_planet()
+                self.planet = self.find_new_planet()
+
+        self.API.join_planet(self.planet)
+        self.info('Joined planet #{}'.format(self.planet))
 
         while True:
             planet_info = self.API.get_planet(self.planet)
@@ -76,8 +75,12 @@ class Salien(Thread):
                         zone = zone_item
 
             if not zone:
-                self.info('Finding a new planet!')
-                self.find_new_planet()
+                self.planet = self.find_new_planet()
+                self.API.join_planet(self.planet)
+
+                self.info('Finding and joining new planet #{}'.format(self.planet))
+
+                continue
 
             time.sleep(random.randint(5, 10))
 
@@ -127,8 +130,7 @@ class SteamApi:
     def get(self, url, data):
         while True:
             try:
-                url += '?' + '&'.join(['{}={}'.format(k, v) for k, v in data.items()])
-                response = requests.get(url, headers=self.headers)
+                response = requests.get(url, params=data, headers=self.headers)
 
                 return response.json()
             except Exception:
@@ -268,5 +270,5 @@ if __name__ == '__main__':
             logger.warning('Token is invalid, it should be 32 characters long!')
             exit()
 
-        temp_thread = Salien(args.token)
+        temp_thread = Salien(args.token, '', args.language, args.planet)
         temp_thread.start()
