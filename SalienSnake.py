@@ -92,7 +92,7 @@ class Salien(Thread):
             try:
                 score_stats = self.API.report_score(score)
 
-                self.info('Current score = {}/{}; Current Level = {}'.format(
+                self.info('Current score = {}/{}; Current level = {}'.format(
                     score_stats['response']['new_score'],
                     score_stats['response']['next_level_score'],
                     score_stats['response']['new_level']
@@ -128,7 +128,7 @@ class Steam_API:
 
                 return response.json()
             except Exception:
-                logger.warning('Exception has been occurred in API.get')
+                logger.warning('An exception has occurred in API.get')
 
             time.sleep(1)
 
@@ -139,7 +139,7 @@ class Steam_API:
 
                 return response.json()
             except Exception:
-                logger.warning('Exception has been occurred in API.post')
+                logger.warning('An exception has occurred in API.post')
 
             time.sleep(1)
 
@@ -220,9 +220,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--token', help='Token value from https://steamcommunity.com/saliengame/gettoken')
     parser.add_argument('-p', '--planet', help='Planet ID')
-    parser.add_argument('-f', '--file', help='File with sessions IDs')
+    parser.add_argument('-f', '--file', help='File with session IDs')
     parser.add_argument('--language', help='Language (example: english, russian)')
-    parser.add_argument('-l', '--list-planets', action='store_true', help='List planets')
+    parser.add_argument('-l', '--list-planets', action='store_true', help='List all planets')
     args = parser.parse_args()
 
     if not args.language:
@@ -237,7 +237,7 @@ if __name__ == '__main__':
                 temp_thread = Salien(token, name)
                 temp_thread.start()
 
-                logger.info('Thread \'{}\' has been started!'.format(name))
+                logger.info('Thread \'{}\' has started!'.format(name))
     else:
         if args.list_planets:
             API = Steam_API(language=args.language)
@@ -255,7 +255,7 @@ if __name__ == '__main__':
         if not args.token:
             logger.warning(
                 'https://steamcommunity.com/saliengame/gettoken, please copy and paste the value of \'token\'\n'
-                'This will look like: 00112233445566778899aabbccddeeff'
+                'It will look like \'00112233445566778899aabbccddeeff\''
             )
             args.token = input('Token: ')
 
