@@ -74,7 +74,6 @@ class Salien(Thread):
                 for zone_item in planet_info['response']['planets'][0]['zones']:
                     if not zone_item['captured'] and (not zone or zone['difficulty'] < zone_item['difficulty']):
                         zone = zone_item
-                        break
 
             if not zone:
                 self.info('Finding a new planet!')
