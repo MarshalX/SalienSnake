@@ -25,7 +25,7 @@ logger.setLevel(logging.INFO)
 
 
 class Salien(Thread):
-    def __init__(self, token, name='', language=None, planet=None):
+    def __init__(self, token, name, language=None, planet=None):
         Thread.__init__(self)
 
         self.name = name
@@ -34,10 +34,10 @@ class Salien(Thread):
         self.player = self.API.get_player_info()
 
     def info(self, msg):
-        logger.info('{} {}'.format(self.name, msg))
+        logger.info('{}: {}'.format(self.name, msg))
 
     def warning(self, msg):
-        logger.warning('{} {}'.format(self.name, msg))
+        logger.warning('{}: {}'.format(self.name, msg))
 
     def find_new_planet(self):
         new_planets = self.API.get_planets()
@@ -105,7 +105,28 @@ class Salien(Thread):
                     score_stats['response']['new_level']
                 ))
             except KeyError:
-                self.warning('API. ReportScore. Request sent too early.')
+                self.warning('API. ReportScore. Request sent too early. X-eresult: {}; x-error_message: {}'.format(
+                    self.API.response_headers.get('x-eresult'), self.API.response_headers.get('x-error_message')))
+
+
+def request_decorate(method):
+    def wrapper(self, url, data):
+        while True:
+            try:
+                request = method(self, url, data)
+                response = request.json()
+
+                self.response_headers = request.headers
+
+                logger.debug('{}{}: {}; Response headers: {}'.format(
+                    method.__name__.upper(), data, response, request.headers))
+                return response
+            except Exception as e:
+                logger.warning('An exception has occurred in API.{}: {}'.format(method.__name__, e))
+
+            time.sleep(1)
+
+    return wrapper
 
 
 class SteamApi:
@@ -121,33 +142,20 @@ class SteamApi:
     api_version = 'v0001'
 
     def __init__(self, token=None, language=None):
-        self.language = 'english' if not language else language
+        self.language = language
         self.token = token
+        self.response_headers = {}
 
     def build_url(self, interface, method):
         return '{}{}/{}/{}/'.format(self.api_host, interface, method, self.api_version)
 
+    @request_decorate
     def get(self, url, data):
-        while True:
-            try:
-                response = requests.get(url, params=data, headers=self.headers)
+        return requests.get(url, params=data, headers=self.headers)
 
-                return response.json()
-            except Exception:
-                logger.warning('An exception has occurred in API.get')
-
-            time.sleep(1)
-
+    @request_decorate
     def post(self, url, data):
-        while True:
-            try:
-                response = requests.post(url, headers=self.headers, data=data)
-
-                return response.json()
-            except Exception:
-                logger.warning('An exception has occurred in API.post')
-
-            time.sleep(1)
+        return requests.post(url, headers=self.headers, data=data)
 
     def get_planet(self, planet_id):
         return self.get(
@@ -224,51 +232,68 @@ class SteamApi:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--token', help='Token value from https://steamcommunity.com/saliengame/gettoken')
+    parser.add_argument(
+        '-t', '--token', help='Token value from https://steamcommunity.com/saliengame/gettoken')
     parser.add_argument('-p', '--planet', help='Planet ID')
     parser.add_argument('-f', '--file', help='File with session IDs')
-    parser.add_argument('--language', help='Language (example: english, russian)')
-    parser.add_argument('-l', '--list-planets', action='store_true', help='List all planets')
+    parser.add_argument(
+        '--language', help='Language (example: english, russian)', default='english')
+    parser.add_argument(
+        '-l', '--list-planets', action='store_true', help='List all planets')
+    parser.add_argument(
+        '-d', '--debug', action='store_true', help='Enable debug mode', default=False)
     args = parser.parse_args()
 
-    if not args.language:
-        args.language = 'english'
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+
+    if args.list_planets:
+        API = SteamApi(language=args.language)
+
+        planets = API.get_planets()
+        for planet in planets['response']['planets']:
+            logger.info('{}: {} ({}%)'.format(
+                planet['id'], planet['state']['name'],
+                int(planet['state']['capture_progress'] * 100)
+            ))
+
+        logger.info(
+            'You learned the ID of planets, now you can use --planet <planet id> '
+            'or skip this argument, then planet will be automatically selected.')
+        exit(0)
+
+    tokens = {}
 
     if args.file:
         with open(args.file, 'r', encoding='UTF-8') as f:
             for number, token in enumerate(f.readlines()):
-                token = token.replace('\n', '')
+                token = token.strip()
                 name = 'Account #{}'.format(number)
 
                 if len(token) != 32:
-                    logger.warning('Token on {} line is invalid, it should be 32 characters long!'.format(number + 1))
-                    exit()
+                    logger.warning(
+                        'Token on {} line is invalid, it should be '
+                        '32 characters long!'.format(number + 1))
+                    continue
 
-                temp_thread = Salien(token, name)
-                temp_thread.start()
-
-                logger.info('Thread \'{}\' has started!'.format(name))
+                tokens[name] = token
     else:
-        if args.list_planets:
-            API = SteamApi(language=args.language)
-
-            planets = API.get_planets()
-            for planet in planets['response']['planets']:
-                logger.info('{}: {} ({}%)'.format(
-                    planet['id'], planet['state']['name'],
-                    int(planet['state']['capture_progress'] * 100)
-                ))
-
         if not args.token:
             logger.warning(
-                'https://steamcommunity.com/saliengame/gettoken, please copy and paste the value of \'token\'\n'
+                'https://steamcommunity.com/saliengame/gettoken, '
+                'please copy and paste the value of \'token\'\n'
                 'It will look like \'00112233445566778899aabbccddeeff\''
             )
             args.token = input('Token: ')
 
         if len(args.token) != 32:
-            logger.warning('Token is invalid, it should be 32 characters long!')
-            exit()
+            logger.warning(
+                'Token is invalid, it should be 32 characters long!')
+        else:
+            tokens['Account #0'] = args.token
 
-        temp_thread = Salien(args.token, '', args.language, args.planet)
-        temp_thread.start()
+    for name, token in tokens.items():
+        Salien(token, name, args.language, args.planet).start()
+
+        logger.info('Thread \'{}\' has started!'.format(name))
+        time.sleep(1)   # ReportScore too early?
