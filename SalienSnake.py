@@ -77,15 +77,14 @@ class Salien(Thread):
             planet_info = self.API.get_planet(self.planet)
             zone = None
 
-            if 'planets' in planet_info['response']:
-                for zone_item in planet_info['response']['planets'][0]['zones']:
-                    if not self.disable_boss_priority and zone_item['type'] == 4:
-                        zone = zone_item
-                        break
+            for zone_item in planet_info['response']['planets'][0]['zones']:
+                if not self.disable_boss_priority and zone_item['type'] == 4:
+                    zone = zone_item
+                    break
 
-                    if not zone_item['captured'] and zone_item['capture_progress'] < 0.95 \
-                            and (not zone or zone['difficulty'] < zone_item['difficulty']):
-                        zone = zone_item
+                if not zone_item['captured'] and zone_item['capture_progress'] < 0.95 \
+                        and (not zone or zone['difficulty'] < zone_item['difficulty']):
+                    zone = zone_item
 
             if not zone:
                 self.planet = self.find_new_planet()
@@ -93,7 +92,7 @@ class Salien(Thread):
 
                 continue
 
-            self.info('Attacking zone {}; difficulty {} '
+            self.info('Attacking zone {}; difficulty {} {}'
                       .format(zone['zone_position'], zone['difficulty'], ('BOSS' if zone['type'] == 4 else '')))
             self.API.join_zone(zone['zone_position'])
 
@@ -129,19 +128,22 @@ def request_decorate(method):
         while True:
             try:
                 request = method(self, url, data)
+                self.response_headers = request.headers
+                self.response_headers['code'] = request.status_code
+
+                logger.debug('Method: {}; Data: {}; Response headers: {}'.format(
+                    method.__name__.upper(), data, request.headers))
+
                 response = request.json()
 
-                self.response_headers = request.headers
-
-                logger.debug('{}{}: {}; Response headers: {}'.format(
-                    method.__name__.upper(), data, response, request.headers))
-
-                if 'response' not in response:
-                    raise Exception('Cannot get response from Steam API')
+                logger.debug('Response: {}'.format(response))
 
                 return response
+            except ValueError:
+                logger.warning("Cannot get json response from Steam API. Status code: {}"
+                               .format(self.response_headers['code']))
             except Exception as e:
-                logger.warning('An exception has occurred in API.{}: {}'.format(method.__name__, e))
+                logger.warning('An exception has occurred in API.{}: {}'.format(method.__name__, repr(e)))
 
             time.sleep(1)
 
