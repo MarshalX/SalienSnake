@@ -9,14 +9,15 @@ A simple bot for the Steam 2018 summer sale. Multi-Account Support.
 
 ## Single account
 ```
-python SalienSnake.py [--token <token>] [--planet <planet id>] [--list-planets] [--language <language>]
+python SalienSnake.py [--token <token>] [--planet <planet id>] [--language <language>] [--list-planets] [--debug] [--disable-boss-priority]
 ```
 Arguments:
 * **-t, --token (required)** - Token value from https://steamcommunity.com/saliengame/gettoken
 * **-p, --planet** - Planet ID
 * **-l, --list-planets** - Print list with planet names and IDs
-* **--language** - Language (english, russian, etc.)
-* **-d, --debug** - Enable debug mode
+* **--language (default: english)** - Language (english, russian, etc.)
+* **-d, --debug (default: False)** - Enable debug mode
+* **-dbp, --disable-boss-priority (default: False)** - Disable boss priority (if the boss is found on the planet, then he will NOT be attacked)
 
 Examples:
 ```
@@ -27,11 +28,12 @@ python SalienSnake.py --token h0s07sgjfhzhe19fxri1cf9fofm8ubqv --list-planets
 
 ## Multi-account
 ```
-python SalienSnake.py [--file <filename with extension>]
+python SalienSnake.py [--file <filename with extension>] [--debug] [--disable-boss-priority]
 ```
 Arguments:
 * **-f, --file (required)** - File with tokens (one per line)
-* **-d, --debug** - Enable debug mode
+* **-d, --debug (default: False)** - Enable debug mode
+* **-dbp, --disable-boss-priority (default: False)** - Disable boss priority (if the boss is found on the planet, then he will NOT be attacked)
 
 Example of file with tokens:
 ```

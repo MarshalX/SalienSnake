@@ -25,11 +25,12 @@ logger.setLevel(logging.INFO)
 
 
 class Salien(Thread):
-    def __init__(self, token, name, language=None, planet=None):
+    def __init__(self, token, name, disable_boss_priority, language=None, planet=None):
         Thread.__init__(self)
 
         self.name = name
         self.planet = planet
+        self.disable_boss_priority = disable_boss_priority
         self.API = SteamApi(token, language)
         self.player = self.API.get_player_info()
 
@@ -39,15 +40,23 @@ class Salien(Thread):
     def warning(self, msg):
         logger.warning('{}: {}'.format(self.name, msg))
 
+    def join_self_planet(self):
+        self.API.join_planet(self.planet)
+        self.info('Joined planet #{}'.format(self.planet))
+
     def find_new_planet(self):
         new_planets = self.API.get_planets()
-        for new_planet in new_planets['response']['planets']:
-            if not new_planet['state']['captured']:
-                self.info('Planet #{} - {} ({}%) seems nice, joining there!'.format(
-                    new_planet['id'], new_planet['state']['name'], int(new_planet['state']['capture_progress'] * 100)
-                ))
+        new_planet = None
 
-                return new_planet['id']
+        for planet_item in new_planets['response']['planets']:
+            if not planet_item['state']['captured'] and \
+                    (not new_planet or new_planet['state']['capture_progress'] > planet_item['state']['capture_progress']):
+                new_planet = planet_item
+
+        self.info('Planet #{} - {} ({}%) seems nice, joining there!'.format(
+            new_planet['id'], new_planet['state']['name'], int(new_planet['state']['capture_progress'] * 100)
+        ))
+        return new_planet['id']
 
     def run(self):
         self.info('Current score = {}/{}; Current Level = {}'.format(
@@ -62,8 +71,7 @@ class Salien(Thread):
             else:
                 self.planet = self.find_new_planet()
 
-        self.API.join_planet(self.planet)
-        self.info('Joined planet #{}'.format(self.planet))
+        self.join_self_planet()
 
         while True:
             planet_info = self.API.get_planet(self.planet)
@@ -71,30 +79,27 @@ class Salien(Thread):
 
             if 'planets' in planet_info['response']:
                 for zone_item in planet_info['response']['planets'][0]['zones']:
-                    if not zone_item['captured'] and (not zone or zone['difficulty'] < zone_item['difficulty']):
+                    if not self.disable_boss_priority and zone_item['type'] == 4:
+                        zone = zone_item
+                        break
+
+                    if not zone_item['captured'] and zone_item['capture_progress'] < 0.95 \
+                            and (not zone or zone['difficulty'] < zone_item['difficulty']):
                         zone = zone_item
 
             if not zone:
                 self.planet = self.find_new_planet()
-                self.API.join_planet(self.planet)
-
-                self.info('Finding and joining new planet #{}'.format(self.planet))
+                self.join_self_planet()
 
                 continue
 
-            time.sleep(random.randint(5, 10))
-
-            self.info('Attacking zone {}'.format(zone['zone_position']))
+            self.info('Attacking zone {}; difficulty {} '
+                      .format(zone['zone_position'], zone['difficulty'], ('BOSS' if zone['type'] == 4 else '')))
             self.API.join_zone(zone['zone_position'])
 
-            time.sleep(125)
+            time.sleep(random.randint(110, 120))
 
-            difficulty_scores = {
-                1: '595',
-                2: '1190',
-                3: '2380'
-            }
-            score = difficulty_scores.get(zone['difficulty'], 120)
+            score = 120 * (5 * (2 ** (zone['difficulty'] - 1)))
 
             try:
                 score_stats = self.API.report_score(score)
@@ -105,8 +110,18 @@ class Salien(Thread):
                     score_stats['response']['new_level']
                 ))
             except KeyError:
-                self.warning('API. ReportScore. Request sent too early. X-eresult: {}; x-error_message: {}'.format(
-                    self.API.response_headers.get('x-eresult'), self.API.response_headers.get('x-error_message')))
+                x_eresult = int(self.API.response_headers.get('x-eresult', -1))
+                if x_eresult == 93:
+                    self.warning('API. ReportScore. Request sent too early.')
+                elif x_eresult == 73:
+                    self.warning('API. ReportScore. Invalid \'score\' value.')
+                elif x_eresult == 42:
+                    self.warning('API. ReportScore. Did not have time to send the report or did not attack the zone.')
+                else:
+                    self.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
+                        x_eresult, self.API.response_headers.get('x-error_message')))
+
+            self.player = self.API.get_player_info()
 
 
 def request_decorate(method):
@@ -120,6 +135,10 @@ def request_decorate(method):
 
                 logger.debug('{}{}: {}; Response headers: {}'.format(
                     method.__name__.upper(), data, response, request.headers))
+
+                if 'response' not in response:
+                    raise Exception('Cannot get response from Steam API')
+
                 return response
             except Exception as e:
                 logger.warning('An exception has occurred in API.{}: {}'.format(method.__name__, e))
@@ -214,8 +233,8 @@ class SteamApi:
         return self.post(
             self.build_url('ITerritoryControlMinigameService', 'ReportScore'),
             {
-                'score': score,
                 'access_token': self.token,
+                'score': score,
                 'language': self.language
             }
         )
@@ -242,6 +261,9 @@ if __name__ == '__main__':
         '-l', '--list-planets', action='store_true', help='List all planets')
     parser.add_argument(
         '-d', '--debug', action='store_true', help='Enable debug mode', default=False)
+    parser.add_argument(
+        '-dbp', '--disable-boss-priority', action='store_true',
+        help='Disable boss priority (if the boss is found on the planet, then he will NOT be attacked)', default=False)
     args = parser.parse_args()
 
     if args.debug:
@@ -293,7 +315,6 @@ if __name__ == '__main__':
             tokens['Account #0'] = args.token
 
     for name, token in tokens.items():
-        Salien(token, name, args.language, args.planet).start()
+        Salien(token, name, args.disable_boss_priority, args.language, args.planet).start()
 
         logger.info('Thread \'{}\' has started!'.format(name))
-        time.sleep(1)   # ReportScore too early?
