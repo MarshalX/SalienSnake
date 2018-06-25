@@ -98,7 +98,9 @@ class Salien(Thread):
             self.API.join_zone(zone['zone_position'])
 
             if not self.flood_mode:
-                time.sleep(random.randint(110, 120))
+                time.sleep(120)
+            else:
+                time.sleep(100)
 
             score = 120 * (5 * (2 ** (zone['difficulty'] - 1)))
 
@@ -135,6 +137,8 @@ class Salien(Thread):
                     else:
                         self.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
                             x_eresult, self.API.response_headers.get('x-error_message')))
+
+                    break
 
                 self.player = self.API.get_player_info()
 
