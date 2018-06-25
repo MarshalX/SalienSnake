@@ -1,39 +1,46 @@
 # SalienSnake
-A simple bot for the Steam 2018 summer sale. Multi-Account Support.
+A simple bot written on Python for the Steam 2018 summer sale.
+
+# Features:
+* cross-platform;
+* work without a browser;
+* stable work (error handling and recovery);
+* multi-account support with threading;
+* high-level zones priority;
+* boss priority;
+* specifying  the necessary planet;
+* getting a list of active planets;
+* specifying  for output of Steam API response;
+* auto-selects the planet with the lowest capture level for a longer retention time and high-level zones.
 
 # Requirements
-* Python 3
-* requests
+* [Python 3](https://www.python.org/)
+* [requests](https://pypi.org/project/requests/)
 
 # Usage
+```
+python SalienSnake.py [--token <token>] [--file <filename with extension>] [--planet <planet id>] [--language <language>] [--list-planets] [--debug] [--disable-boss-priority] [--flood-mode]
+```
 
-## Single account
-```
-python SalienSnake.py [--token <token>] [--planet <planet id>] [--language <language>] [--list-planets] [--debug] [--disable-boss-priority]
-```
-Arguments:
-* **-t, --token (required)** - Token value from https://steamcommunity.com/saliengame/gettoken
+* Modes:
+    * **-t, --token (single account mode)** - Token value from https://steamcommunity.com/saliengame/gettoken
+    * **-f, --file (multi-account mode)** - File with tokens (one per line)
 * **-p, --planet** - Planet ID
 * **-l, --list-planets** - Print list with planet names and IDs
 * **--language (default: english)** - Language (english, russian, etc.)
 * **-d, --debug (default: False)** - Enable debug mode
 * **-dbp, --disable-boss-priority (default: False)** - Disable boss priority (if the boss is found on the planet, then he will NOT be attacked)
+* **-fm, --flood-mode (default: False)** - Enable flood mode. Requests to send a report will be sent every second! Include only if you have a common problem with the "API. ReportScore".
 
-Examples:
+# Examples
+### Single account example:
 ```
 python SalienSnake.py --token nizqvw1sd9d4gf2nwecrg5n26e1zl80l
 python SalienSnake.py --token 6ibdq3baf21w1xca1x5gtgx2iwez6mn1 --planet 1
 python SalienSnake.py --token h0s07sgjfhzhe19fxri1cf9fofm8ubqv --list-planets
 ```
 
-## Multi-account
-```
-python SalienSnake.py [--file <filename with extension>] [--debug] [--disable-boss-priority]
-```
-Arguments:
-* **-f, --file (required)** - File with tokens (one per line)
-* **-d, --debug (default: False)** - Enable debug mode
-* **-dbp, --disable-boss-priority (default: False)** - Disable boss priority (if the boss is found on the planet, then he will NOT be attacked)
+### Multi-account example
 
 Example of file with tokens:
 ```
@@ -45,7 +52,11 @@ h0s07sgjfhzhe19fxri1cf9fofm8ubqv
 Example use:
 ```
 python SalienSnake.py --file tokens.txt
+python SalienSnake.py --file tokens.txt --planet 2
+python SalienSnake.py --file tokens.txt --flood-mode
 ```
+# Screenshot
+![SalienSnake screenshot](https://i.imgur.com/7fkYNWy.png)
 
 # Useful links:
 * [Download Python](https://www.python.org/downloads/)

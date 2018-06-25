@@ -25,12 +25,13 @@ logger.setLevel(logging.INFO)
 
 
 class Salien(Thread):
-    def __init__(self, token, name, disable_boss_priority, language=None, planet=None):
+    def __init__(self, token, name, flood_mode, disable_boss_priority, language=None, planet=None):
         Thread.__init__(self)
 
         self.name = name
         self.planet = planet
         self.disable_boss_priority = disable_boss_priority
+        self.flood_mode = flood_mode
         self.API = SteamApi(token, language)
         self.player = self.API.get_player_info()
 
@@ -96,31 +97,46 @@ class Salien(Thread):
                       .format(zone['zone_position'], zone['difficulty'], ('BOSS' if zone['type'] == 4 else '')))
             self.API.join_zone(zone['zone_position'])
 
-            time.sleep(random.randint(110, 120))
+            if not self.flood_mode:
+                time.sleep(random.randint(110, 120))
 
             score = 120 * (5 * (2 ** (zone['difficulty'] - 1)))
 
-            try:
-                score_stats = self.API.report_score(score)
+            while True:
+                try:
+                    score_stats = self.API.report_score(score)
 
-                self.info('Current score = {}/{}; Current level = {}'.format(
-                    score_stats['response']['new_score'],
-                    score_stats['response']['next_level_score'],
-                    score_stats['response']['new_level']
-                ))
-            except KeyError:
-                x_eresult = int(self.API.response_headers.get('x-eresult', -1))
-                if x_eresult == 93:
-                    self.warning('API. ReportScore. Request sent too early.')
-                elif x_eresult == 73:
-                    self.warning('API. ReportScore. Invalid \'score\' value.')
-                elif x_eresult == 42:
-                    self.warning('API. ReportScore. Did not have time to send the report or did not attack the zone.')
-                else:
-                    self.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
-                        x_eresult, self.API.response_headers.get('x-error_message')))
+                    self.info('Current score = {}/{}; Current level = {}'.format(
+                        score_stats['response']['new_score'],
+                        score_stats['response']['next_level_score'],
+                        score_stats['response']['new_level']
+                    ))
 
-            self.player = self.API.get_player_info()
+                    break
+                except KeyError:
+                    x_eresult = int(self.API.response_headers.get('x-eresult', -1))
+
+                    if x_eresult == 93 and self.flood_mode:
+                        time.sleep(1)
+
+                        continue
+
+                    if x_eresult == 93:
+                        self.warning('API. ReportScore. Request sent too early.')
+                    elif x_eresult == 73:
+                        self.warning('API. ReportScore. Invalid \'score\' value.')
+                    elif x_eresult == 42:
+                        self.warning(
+                            'API. ReportScore. Did not have time to send the report or did not attack the zone.')
+                    elif x_eresult == 27:
+                        self.warning(
+                            'API. ReportScore. Zone Captured! This zone has been recaptured '
+                            'from the Duldrumz by the Steam Community.')
+                    else:
+                        self.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
+                            x_eresult, self.API.response_headers.get('x-error_message')))
+
+                self.player = self.API.get_player_info()
 
 
 def request_decorate(method):
@@ -266,6 +282,10 @@ if __name__ == '__main__':
     parser.add_argument(
         '-dbp', '--disable-boss-priority', action='store_true',
         help='Disable boss priority (if the boss is found on the planet, then he will NOT be attacked)', default=False)
+    parser.add_argument(
+        '-fm', '--flood-mode', action='store_true',
+        help='Enable flood mode. Requests to send a report will be sent every second! '
+             'Include only if you have a common problem with the "API. ReportScore"', default=False)
     args = parser.parse_args()
 
     if args.debug:
@@ -317,6 +337,6 @@ if __name__ == '__main__':
             tokens['Account #0'] = args.token
 
     for name, token in tokens.items():
-        Salien(token, name, args.disable_boss_priority, args.language, args.planet).start()
+        Salien(token, name, args.flood_mode, args.disable_boss_priority, args.language, args.planet).start()
 
         logger.info('Thread \'{}\' has started!'.format(name))
