@@ -3,13 +3,13 @@
 # SalienSnake Copyright © 2018 Il'ya Semyonov
 # License: https://www.gnu.org/licenses/gpl-3.0.en.html
 
-import random
 import argparse
 import requests
 import time
 import logging
 
 from threading import Thread
+from enum import Enum
 
 logFormatter = logging.Formatter(
     '%(levelname)-5s [%(asctime)s] %(message)s',
@@ -22,125 +22,6 @@ console_handler.setFormatter(logFormatter)
 
 logger.addHandler(console_handler)
 logger.setLevel(logging.INFO)
-
-
-class Salien(Thread):
-    def __init__(self, token, name, flood_mode, disable_boss_priority, language=None, planet=None):
-        Thread.__init__(self)
-
-        self.name = name
-        self.planet = planet
-        self.disable_boss_priority = disable_boss_priority
-        self.flood_mode = flood_mode
-        self.API = SteamApi(token, language)
-        self.player = self.API.get_player_info()
-
-    def info(self, msg):
-        logger.info('{}: {}'.format(self.name, msg))
-
-    def warning(self, msg):
-        logger.warning('{}: {}'.format(self.name, msg))
-
-    def join_self_planet(self):
-        self.API.join_planet(self.planet)
-        self.info('Joined planet #{}'.format(self.planet))
-
-    def find_new_planet(self):
-        new_planets = self.API.get_planets()
-        new_planet = None
-
-        for planet_item in new_planets['response']['planets']:
-            if not planet_item['state']['captured'] and \
-                    (not new_planet or new_planet['state']['capture_progress'] > planet_item['state']['capture_progress']):
-                new_planet = planet_item
-
-        self.info('Planet #{} - {} ({}%) seems nice, joining there!'.format(
-            new_planet['id'], new_planet['state']['name'], int(new_planet['state']['capture_progress'] * 100)
-        ))
-        return new_planet['id']
-
-    def run(self):
-        self.info('Current score = {}/{}; Current Level = {}'.format(
-            self.player['response']['score'],
-            self.player['response']['next_level_score'],
-            self.player['response']['level']
-        ))
-
-        if not self.planet:
-            if 'active_planet' in self.player['response']:
-                self.planet = self.player['response']['active_planet']
-            else:
-                self.planet = self.find_new_planet()
-
-        self.join_self_planet()
-
-        while True:
-            planet_info = self.API.get_planet(self.planet)
-            zone = None
-
-            for zone_item in planet_info['response']['planets'][0]['zones']:
-                if not self.disable_boss_priority and zone_item['type'] == 4:
-                    zone = zone_item
-                    break
-
-                if not zone_item['captured'] and zone_item['capture_progress'] < 0.95 \
-                        and (not zone or zone['difficulty'] < zone_item['difficulty']):
-                    zone = zone_item
-
-            if not zone:
-                self.planet = self.find_new_planet()
-                self.join_self_planet()
-
-                continue
-
-            self.info('Attacking zone {}; difficulty {} {}'
-                      .format(zone['zone_position'], zone['difficulty'], ('BOSS' if zone['type'] == 4 else '')))
-            self.API.join_zone(zone['zone_position'])
-
-            if not self.flood_mode:
-                time.sleep(120)
-            else:
-                time.sleep(100)
-
-            score = 120 * (5 * (2 ** (zone['difficulty'] - 1)))
-
-            while True:
-                try:
-                    score_stats = self.API.report_score(score)
-
-                    self.info('Current score = {}/{}; Current level = {}'.format(
-                        score_stats['response']['new_score'],
-                        score_stats['response']['next_level_score'],
-                        score_stats['response']['new_level']
-                    ))
-
-                    break
-                except KeyError:
-                    x_eresult = int(self.API.response_headers.get('x-eresult', -1))
-
-                    if x_eresult == 93 and self.flood_mode:
-                        time.sleep(1)
-
-                        continue
-
-                    if x_eresult == 93:
-                        self.warning('API. ReportScore. Request sent too early.')
-                    elif x_eresult == 73:
-                        self.warning('API. ReportScore. Invalid \'score\' value.')
-                    elif x_eresult == 42:
-                        self.warning(
-                            'API. ReportScore. Did not have time to send the report or did not attack the zone.')
-                    elif x_eresult == 27:
-                        self.warning(
-                            'API. ReportScore. Zone Captured! This zone has been recaptured '
-                            'from the Duldrumz by the Steam Community.')
-                    else:
-                        self.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
-                            x_eresult, self.API.response_headers.get('x-error_message')))
-
-                    break
-
-                self.player = self.API.get_player_info()
 
 
 def request_decorate(method):
@@ -182,7 +63,7 @@ class SteamApi:
     api_host = 'https://community.steam-api.com/'
     api_version = 'v0001'
 
-    def __init__(self, token=None, language=None):
+    def __init__(self, token=None, language='english'):
         self.language = language
         self.token = token
         self.response_headers = {}
@@ -263,19 +144,202 @@ class SteamApi:
 
     def leave_game_instance(self, instance_id):
         return self.post(
-            self.build_url('ITerritoryControlMinigameService', 'LeaveGame'),
+            self.build_url('IMiniGameService', 'LeaveGame'),
             {
-                'gameid': instance_id,
-                'access_token': self.token
+                'access_token': self.token,
+                'gameid': instance_id
             }
         )
+
+
+class Difficulty(Enum):
+    HIGH = 3
+    MEDIUM = 2
+    LOW = 1
+
+
+class ThreadWithName(Thread):
+    def __init__(self):
+        Thread.__init__(self)
+
+        self.name = ''
+
+    def info(self, msg):
+        logger.info('{}: {}'.format(self.name, msg))
+
+    def warning(self, msg):
+        logger.warning('{}: {}'.format(self.name, msg))
+
+
+class Commander(ThreadWithName):
+    _API = SteamApi()
+
+    planet = None
+    zone = None
+
+    def __init__(self):
+        ThreadWithName.__init__(self)
+
+        self.name = 'Commander'
+
+    @staticmethod
+    def find_best_planet_and_zone():
+        new_planets = Commander._API.get_planets()
+        planets_info = []
+
+        for planet_item in new_planets['response']['planets']:
+            if not planet_item['state']['captured']:
+                planets_info.append(Commander._API.get_planet(planet_item['id']))
+
+        for difficulty in Difficulty:
+            for planet_info in planets_info:
+                for zone_item in planet_info['response']['planets'][0]['zones']:
+                    if not zone_item['captured'] and zone_item['difficulty'] == difficulty.value:
+                        return planet_info['response']['planets'][0], zone_item
+
+            logger.info('Commander: can\'t get planets with the complexity level of zones {}'.format(difficulty))
+
+    @staticmethod
+    def check_zone(planet, zone):
+        logger.info('Commander: I check the accuracy of my information on zone {}'.format(zone['zone_position']))
+
+        updated_planet_info = Commander._API.get_planet(planet['id'])
+        zone_info = {}
+
+        for zone_item in updated_planet_info['response']['planets'][0]['zones']:
+            if zone_item['zone_position'] == zone['zone_position']:
+                zone_info = zone_item
+
+        if zone_info.get('captured', True):
+            logger.info('Information has become wrong! I give new data...')
+
+            Commander.find_best_planet_and_zone()
+        else:
+            logger.info('Information on the zone is relevant!')
+
+    def run(self):
+        while True:
+            self.info('I get the optimal planet and landing zone!')
+
+            Commander.planet, Commander.zone = Commander.find_best_planet_and_zone()
+
+            self.info('All attack the planet {}, zone {} ({}%)!'.format(
+                Commander.planet['id'],
+                Commander.zone['zone_position'],
+                int(Commander.zone['capture_progress'] * 100)
+            ))
+
+            time.sleep(5 * 60)
+
+
+class Salien(ThreadWithName):
+    def __init__(self, token, name, language=None):
+        ThreadWithName.__init__(self)
+
+        self.name = name
+        self.planet,  self.zone = {}, {}
+        self.API = SteamApi(token, language)
+        self.player = self.API.get_player_info()
+
+    def info(self, msg):
+        logger.info('{}: {}'.format(self.name, msg))
+
+    def warning(self, msg):
+        logger.warning('{}: {}'.format(self.name, msg))
+
+    def leave_planet(self, planet_id):
+        self.info('Trying to leave the current planet...')
+
+        while True:
+            self.API.leave_game_instance(planet_id)
+
+            if self.API.response_headers['x-eresult'] == '1':
+                self.info('Successfully left the planet!')
+
+                break
+            elif self.API.response_headers['x-eresult'] == '11':
+                # The bot did not finish the zone on another planet
+                time.sleep(30)
+
+            time.sleep(1)
+
+    def join_planet(self):
+        self.leave_planet(self.planet['id'])
+        self.API.join_planet(Commander.planet['id'])
+
+        self.info('Yes, sir! Joined planet #{}'.format(Commander.planet['id']))
+
+    def join_zone(self):
+        self.API.join_zone(self.zone['zone_position'])
+
+        if self.API.response_headers['x-eresult'] == '27':
+            Commander.find_best_planet_and_zone()
+
+        self.info('Attacking zone {}; {}'.format(
+            self.zone['zone_position'],
+            Difficulty(self.zone['difficulty'])
+        ))
+
+    def run(self):
+        self.info('Current score = {}/{}; Current Level = {}'.format(
+            self.player['response']['score'],
+            self.player['response']['next_level_score'],
+            self.player['response']['level']
+        ))
+
+        if 'active_planet' in self.player['response']:
+            self.leave_planet(self.player['response']['active_planet'])
+
+        while True:
+            if self.planet.get('id', -1) != Commander.planet['id']:
+                self.planet = Commander.planet
+                self.join_planet()
+
+            if self.zone.get('zone_position', -1) != Commander.zone['zone_position']:
+                self.zone = Commander.zone
+
+            self.join_zone()
+
+            time.sleep(120)
+
+            score = 120 * (5 * (2 ** (self.zone['difficulty'] - 1)))
+
+            try:
+                score_stats = self.API.report_score(score)
+
+                self.info('Current score = {}/{}; Current level = {}'.format(
+                    score_stats['response']['new_score'],
+                    score_stats['response']['next_level_score'],
+                    score_stats['response']['new_level']
+                ))
+            except KeyError:
+                x_eresult = int(self.API.response_headers.get('x-eresult', -1))
+
+                if x_eresult == 93:
+                    self.warning('API. ReportScore. Request sent too early.')
+                elif x_eresult == 73:
+                    self.warning('API. ReportScore. Invalid \'score\' value.')
+                elif x_eresult == 42:
+                    self.warning(
+                        'API. ReportScore. Did not have time to send the report '
+                        'or did not attack the zone or zone captured...')
+                elif x_eresult == 27:
+                    self.warning(
+                        'API. ReportScore. Zone Captured! This zone has been recaptured '
+                        'from the Duldrumz by the Steam Community.')
+                else:
+                    self.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
+                        x_eresult, self.API.response_headers.get('x-error_message')))
+
+                if self.planet.get('id', -1) == Commander.planet['id'] and \
+                        self.zone.get('zone_position', -1) == Commander.zone['zone_position']:
+                    Commander.check_zone(self.planet, self.zone)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '-t', '--token', help='Token value from https://steamcommunity.com/saliengame/gettoken')
-    parser.add_argument('-p', '--planet', help='Planet ID')
     parser.add_argument('-f', '--file', help='File with session IDs')
     parser.add_argument(
         '--language', help='Language (example: english, russian)', default='english')
@@ -283,13 +347,6 @@ if __name__ == '__main__':
         '-l', '--list-planets', action='store_true', help='List all planets')
     parser.add_argument(
         '-d', '--debug', action='store_true', help='Enable debug mode', default=False)
-    parser.add_argument(
-        '-dbp', '--disable-boss-priority', action='store_true',
-        help='Disable boss priority (if the boss is found on the planet, then he will NOT be attacked)', default=False)
-    parser.add_argument(
-        '-fm', '--flood-mode', action='store_true',
-        help='Enable flood mode. Requests to send a report will be sent every second! '
-             'Include only if you have a common problem with the "API. ReportScore"', default=False)
     args = parser.parse_args()
 
     if args.debug:
@@ -340,7 +397,10 @@ if __name__ == '__main__':
         else:
             tokens['Account #0'] = args.token
 
+    Commander().start()
+    while not Commander.planet or not Commander.zone:
+        time.sleep(1)
     for name, token in tokens.items():
-        Salien(token, name, args.flood_mode, args.disable_boss_priority, args.language, args.planet).start()
+        Salien(token, name, args.language).start()
 
         logger.info('Thread \'{}\' has started!'.format(name))
