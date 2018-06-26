@@ -48,7 +48,7 @@ python SalienSnake.py --file tokens.txt
 python SalienSnake.py --file tokens.txt --language russian
 ```
 # Screenshot
-![SalienSnake screenshot](https://i.imgur.com/7fkYNWy.png)
+![SalienSnake screenshot](https://i.imgur.com/ByURj1c.png)
 
 # Useful links:
 * [Download Python](https://www.python.org/downloads/)

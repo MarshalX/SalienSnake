@@ -8,7 +8,7 @@ import requests
 import time
 import logging
 
-from threading import Thread
+from threading import Thread, Lock
 from enum import Enum
 
 logFormatter = logging.Formatter(
@@ -81,8 +81,7 @@ class SteamApi:
 
     def get_planet(self, planet_id):
         return self.get(
-            self.build_url('ITerritoryControlMinigameService', 'GetPlanet'),
-            {
+            self.build_url('ITerritoryControlMinigameService', 'GetPlanet'), {
                 'id': planet_id,
                 'language': self.language
             }
@@ -90,8 +89,7 @@ class SteamApi:
 
     def get_planets(self):
         return self.get(
-            self.build_url('ITerritoryControlMinigameService', 'GetPlanets'),
-            {
+            self.build_url('ITerritoryControlMinigameService', 'GetPlanets'), {
                 'active_only': 1,
                 'language': self.language
             }
@@ -99,16 +97,14 @@ class SteamApi:
 
     def get_player_info(self):
         return self.post(
-            self.build_url('ITerritoryControlMinigameService', 'GetPlayerInfo'),
-            {
+            self.build_url('ITerritoryControlMinigameService', 'GetPlayerInfo'), {
                 'access_token': self.token
             }
         )
 
     def join_planet(self, planet_id):
         return self.post(
-            self.build_url('ITerritoryControlMinigameService', 'JoinPlanet'),
-            {
+            self.build_url('ITerritoryControlMinigameService', 'JoinPlanet'), {
                 'id': planet_id,
                 'access_token': self.token
             }
@@ -116,8 +112,7 @@ class SteamApi:
 
     def join_zone(self, zone_id):
         return self.post(
-            self.build_url('ITerritoryControlMinigameService', 'JoinZone'),
-            {
+            self.build_url('ITerritoryControlMinigameService', 'JoinZone'), {
                 'zone_position': zone_id,
                 'access_token': self.token
             }
@@ -125,8 +120,7 @@ class SteamApi:
 
     def represent_clan(self, clan_id):
         return self.post(
-            self.build_url('ITerritoryControlMinigameService', 'RepresentClan'),
-            {
+            self.build_url('ITerritoryControlMinigameService', 'RepresentClan'), {
                 'access_token': self.token,
                 'clanid': clan_id
             }
@@ -134,8 +128,7 @@ class SteamApi:
 
     def report_score(self, score):
         return self.post(
-            self.build_url('ITerritoryControlMinigameService', 'ReportScore'),
-            {
+            self.build_url('ITerritoryControlMinigameService', 'ReportScore'), {
                 'access_token': self.token,
                 'score': score,
                 'language': self.language
@@ -144,8 +137,7 @@ class SteamApi:
 
     def leave_game_instance(self, instance_id):
         return self.post(
-            self.build_url('IMiniGameService', 'LeaveGame'),
-            {
+            self.build_url('IMiniGameService', 'LeaveGame'), {
                 'access_token': self.token,
                 'gameid': instance_id
             }
@@ -177,6 +169,8 @@ class Commander(ThreadWithName):
     planet = None
     zone = None
 
+    lock = Lock()
+
     def __init__(self):
         ThreadWithName.__init__(self)
 
@@ -201,6 +195,12 @@ class Commander(ThreadWithName):
 
     @staticmethod
     def check_zone(planet, zone):
+        if planet.get('id') != Commander.planet.get('id') or \
+                zone.get('zone_position') != Commander.zone.get('zone_position'):
+            return
+
+        Commander.lock.acquire()
+
         logger.info('Commander: I check the accuracy of my information on zone {}'.format(zone['zone_position']))
 
         updated_planet_info = Commander._API.get_planet(planet['id'])
@@ -216,6 +216,8 @@ class Commander(ThreadWithName):
             Commander.find_best_planet_and_zone()
         else:
             logger.info('Information on the zone is relevant!')
+
+        Commander.lock.release()
 
     def run(self):
         while True:
@@ -237,7 +239,7 @@ class Salien(ThreadWithName):
         ThreadWithName.__init__(self)
 
         self.name = name
-        self.planet,  self.zone = {}, {}
+        self.planet, self.zone = {}, {}
         self.API = SteamApi(token, language)
         self.player = self.API.get_player_info()
 
@@ -263,13 +265,20 @@ class Salien(ThreadWithName):
 
             time.sleep(1)
 
-    def join_planet(self):
-        self.leave_planet(self.planet['id'])
-        self.API.join_planet(Commander.planet['id'])
+    def join_planet(self, planet):
+        cid = self.planet.get('id')
+        if cid != planet['id']:
+            if cid is not None:
+                self.leave_planet(cid)
 
-        self.info('Yes, sir! Joined planet #{}'.format(Commander.planet['id']))
+            self.API.join_planet(planet['id'])
+            self.planet = planet
 
-    def join_zone(self):
+            self.info('Yes, sir! Joined planet #{}'.format(self.planet['id']))
+
+    def join_zone(self, zone):
+        self.zone = zone
+
         self.API.join_zone(self.zone['zone_position'])
 
         if self.API.response_headers['x-eresult'] == '27':
@@ -291,14 +300,8 @@ class Salien(ThreadWithName):
             self.leave_planet(self.player['response']['active_planet'])
 
         while True:
-            if self.planet.get('id', -1) != Commander.planet['id']:
-                self.planet = Commander.planet
-                self.join_planet()
-
-            if self.zone.get('zone_position', -1) != Commander.zone['zone_position']:
-                self.zone = Commander.zone
-
-            self.join_zone()
+            self.join_planet(Commander.planet)
+            self.join_zone(Commander.zone)
 
             time.sleep(120)
 
@@ -331,9 +334,7 @@ class Salien(ThreadWithName):
                     self.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
                         x_eresult, self.API.response_headers.get('x-error_message')))
 
-                if self.planet.get('id', -1) == Commander.planet['id'] and \
-                        self.zone.get('zone_position', -1) == Commander.zone['zone_position']:
-                    Commander.check_zone(self.planet, self.zone)
+                Commander.check_zone(self.planet, self.zone)
 
 
 if __name__ == '__main__':
