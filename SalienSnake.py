@@ -195,11 +195,13 @@ class Commander(NamedThread):
 
     @staticmethod
     def check_zone(planet, zone):
+        Commander.lock.acquire()
+
         if planet.get('id') != Commander.planet.get('id') or \
                 zone.get('zone_position') != Commander.zone.get('zone_position'):
-            return
+            Commander.lock.release()
 
-        Commander.lock.acquire()
+            return
 
         logger.info('Commander: I check the accuracy of my information on zone {}'.format(zone['zone_position']))
 
