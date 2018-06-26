@@ -169,8 +169,6 @@ class Commander(NamedThread):
     planet = None
     zone = None
 
-    captured_planets = []
-
     lock = Lock()
 
     def __init__(self):
@@ -190,8 +188,7 @@ class Commander(NamedThread):
         for difficulty in Difficulty:
             for planet_info in planets_info:
                 for zone_item in planet_info['response']['planets'][0]['zones']:
-                    if not zone_item['captured'] and zone_item['difficulty'] == difficulty.value \
-                            and zone_item['zone_position'] not in Commander.captured_planets:
+                    if not zone_item['captured'] and zone_item['difficulty'] == difficulty.value:
                         return planet_info['response']['planets'][0], zone_item
 
             logger.info('Commander: can\'t get planets with the complexity level of zones {}'.format(difficulty))
@@ -216,7 +213,7 @@ class Commander(NamedThread):
         if zone_info.get('captured', True):
             logger.info('Information has become wrong! I give new data...')
 
-            Commander.find_best_planet_and_zone()
+            Commander.planet, Commander.zone = Commander.find_best_planet_and_zone()
         else:
             logger.info('Information on the zone is relevant!')
 
@@ -279,12 +276,6 @@ class Salien(NamedThread):
         self.API.join_zone(self.zone['zone_position'])
 
         if self.API.response_headers['x-eresult'] == '27':
-            if self.zone['zone_position'] not in Commander.captured_planets:
-                Commander.captured_planets.append(self.zone['zone_position'])
-
-                self.info('The zone at position {} has been added to the list of captured'
-                          .format(self.zone['zone_position']))
-
             raise AttributeError()
 
         self.info('Attacking zone {}; {}'.format(
