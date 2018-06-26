@@ -150,7 +150,7 @@ class Difficulty(Enum):
     LOW = 1
 
 
-class ThreadWithName(Thread):
+class NamedThread(Thread):
     def __init__(self):
         Thread.__init__(self)
 
@@ -163,7 +163,7 @@ class ThreadWithName(Thread):
         logger.warning('{}: {}'.format(self.name, msg))
 
 
-class Commander(ThreadWithName):
+class Commander(NamedThread):
     _API = SteamApi()
 
     planet = None
@@ -172,7 +172,7 @@ class Commander(ThreadWithName):
     lock = Lock()
 
     def __init__(self):
-        ThreadWithName.__init__(self)
+        NamedThread.__init__(self)
 
         self.name = 'Commander'
 
@@ -234,20 +234,14 @@ class Commander(ThreadWithName):
             time.sleep(5 * 60)
 
 
-class Salien(ThreadWithName):
+class Salien(NamedThread):
     def __init__(self, token, name, language=None):
-        ThreadWithName.__init__(self)
+        NamedThread.__init__(self)
 
         self.name = name
         self.planet, self.zone = {}, {}
         self.API = SteamApi(token, language)
         self.player = self.API.get_player_info()
-
-    def info(self, msg):
-        logger.info('{}: {}'.format(self.name, msg))
-
-    def warning(self, msg):
-        logger.warning('{}: {}'.format(self.name, msg))
 
     def leave_planet(self, planet_id):
         self.info('Trying to leave the current planet...')
@@ -282,7 +276,7 @@ class Salien(ThreadWithName):
         self.API.join_zone(self.zone['zone_position'])
 
         if self.API.response_headers['x-eresult'] == '27':
-            Commander.find_best_planet_and_zone()
+            raise AttributeError()
 
         self.info('Attacking zone {}; {}'.format(
             self.zone['zone_position'],
@@ -301,7 +295,14 @@ class Salien(ThreadWithName):
 
         while True:
             self.join_planet(Commander.planet)
-            self.join_zone(Commander.zone)
+
+            try:
+                self.join_zone(Commander.zone)
+            except AttributeError:
+                self.warning('I can\'t attack this zone. It\'s captured!')
+                Commander.check_zone(self.planet, self.zone)
+
+                continue
 
             time.sleep(120)
 
@@ -362,11 +363,6 @@ if __name__ == '__main__':
                 planet['id'], planet['state']['name'],
                 int(planet['state']['capture_progress'] * 100)
             ))
-
-        logger.info(
-            'You learned the ID of planets, now you can use --planet <planet id> '
-            'or skip this argument, then planet will be automatically selected.')
-        exit(0)
 
     tokens = {}
 
