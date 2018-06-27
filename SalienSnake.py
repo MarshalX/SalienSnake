@@ -213,11 +213,17 @@ class Commander(NamedThread):
                 zone_info = zone_item
 
         if zone_info.get('captured', True):
-            logger.info('Information has become wrong! I give new data...')
+            logger.info('Commander: Information has become wrong! I give new data...')
 
             Commander.planet, Commander.zone = Commander.find_best_planet_and_zone()
+
+            logger.info('Commander: New information arrived! Planet {}, zone {} ({}%)!'.format(
+                Commander.planet['id'],
+                Commander.zone['zone_position'],
+                int(Commander.zone['capture_progress'] * 100)
+            ))
         else:
-            logger.info('Information on the zone is relevant!')
+            logger.info('Commander: Information on the zone is relevant!')
 
         Commander.lock.release()
 
@@ -241,33 +247,43 @@ class Salien(NamedThread):
         NamedThread.__init__(self)
 
         self.name = name
-        self.planet, self.zone = {}, {}
-        self.API = SteamApi(token, language)
-        self.player = self.API.get_player_info()
+        self._API = SteamApi(token, language)
+        self.player, self.planet, self.zone = {}, {}, {}
 
-    def leave_planet(self, planet_id):
-        self.info('Trying to leave the current planet...')
+    def get_active_planet(self):
+        self.player = self._API.get_player_info()
 
-        while True:
-            self.API.leave_game_instance(planet_id)
+        return self.player['response'].get('active_planet')
 
-            if self.API.response_headers['x-eresult'] == '1':
-                self.info('Successfully left the planet!')
+    def leave_current_planet(self, planet_id=None):
+        if not planet_id:
+            planet_id = self.get_active_planet()
 
-                break
-            elif self.API.response_headers['x-eresult'] == '11':
-                # The bot did not finish the zone on another planet
-                time.sleep(30)
+        if not planet_id:
+            return
 
-            time.sleep(1)
+        self.info('Trying to leave the current planet (#{})...'.format(planet_id))
+
+        self._API.leave_game_instance(planet_id)
+
+        x_eresult = int(self._API.response_headers.get('x-eresult', -1))
+        if x_eresult == 1:
+            self.info('Successfully left the planet #{}!'.format(planet_id))
+        elif x_eresult == 11:
+            self.info('Waiting for the end of the battle to leave the planet (maximum 2 minutes).')
+
+            time.sleep(120)
+            self.leave_current_planet()
+        else:
+            self.warning('API. LeaveGame. X-eresult: {}; x-error_message: {}'.format(
+                x_eresult, self._API.response_headers.get('x-error_message')))
 
     def join_planet(self, planet):
-        cid = self.planet.get('id')
-        if cid != planet['id']:
-            if cid is not None:
-                self.leave_planet(cid)
+        current_planet = self.planet.get('id')
+        if current_planet != planet['id']:
+            self.leave_current_planet(current_planet)
 
-            self.API.join_planet(planet['id'])
+            self._API.join_planet(planet['id'])
             self.planet = planet
 
             self.info('Yes, sir! Joined planet #{}'.format(self.planet['id']))
@@ -275,9 +291,9 @@ class Salien(NamedThread):
     def join_zone(self, zone):
         self.zone = zone
 
-        self.API.join_zone(self.zone['zone_position'])
+        self._API.join_zone(self.zone['zone_position'])
 
-        if self.API.response_headers['x-eresult'] == '27':
+        if self._API.response_headers['x-eresult'] == '27':
             raise AttributeError()
 
         self.info('Attacking zone {}; {}'.format(
@@ -286,14 +302,20 @@ class Salien(NamedThread):
         ))
 
     def run(self):
+        # Getting information about the user and leaving the active planet if it does not suit us
+        active_planet = self.get_active_planet()
+        if active_planet and Commander.planet['id'] != active_planet:
+            self.leave_current_planet(active_planet)
+        else:
+            self.planet['id'] = active_planet
+
+            self.info('I\'m already on necessary planet')
+
         self.info('Current score = {}/{}; Current Level = {}'.format(
             self.player['response']['score'],
             self.player['response']['next_level_score'],
             self.player['response']['level']
         ))
-
-        if 'active_planet' in self.player['response']:
-            self.leave_planet(self.player['response']['active_planet'])
 
         while True:
             self.join_planet(Commander.planet)
@@ -312,7 +334,7 @@ class Salien(NamedThread):
             score = 120 * (5 * (2 ** (self.zone['difficulty'] - 1)))
 
             try:
-                score_stats = self.API.report_score(score)
+                score_stats = self._API.report_score(score)
 
                 self.info('Current score = {}/{}; Current level = {}'.format(
                     score_stats['response']['new_score'],
@@ -320,7 +342,7 @@ class Salien(NamedThread):
                     score_stats['response']['new_level']
                 ))
             except KeyError:
-                x_eresult = int(self.API.response_headers.get('x-eresult', -1))
+                x_eresult = int(self._API.response_headers.get('x-eresult', -1))
 
                 if x_eresult == 93:
                     self.warning('API. ReportScore. Request sent too early.')
@@ -336,7 +358,7 @@ class Salien(NamedThread):
                         'from the Duldrumz by the Steam Community.')
                 else:
                     self.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
-                        x_eresult, self.API.response_headers.get('x-error_message')))
+                        x_eresult, self._API.response_headers.get('x-error_message')))
 
                 Commander.check_zone(self.planet, self.zone)
 
