@@ -368,10 +368,12 @@ class Player(NamedThread):
         self.info('Attacking BOSS zone {}'.format(zone['zone_position']))
 
     def report_boss_damage(self, damage_done, damage_taken, used_healing):
-        self.API.report_boss_damage(damage_done, damage_taken, used_healing)
+        response = self.API.report_boss_damage(damage_done, damage_taken, used_healing)
 
         if self.API.response_headers['x-eresult'] != '1':
             raise AttributeError()
+
+        return response['response']
 
     def run(self):
         self.leave_current_zone()
@@ -478,7 +480,7 @@ class Game:
 
             if not seconds % 5:
                 try:
-                    response = self.player.report_boss_damage(damage_done, damage_taken, used_healing)['response']
+                    response = self.player.report_boss_damage(damage_done, damage_taken, used_healing)
                 except AttributeError:
                     self.player.warning('API. ReportBossDamage. X-eresult: {}; x-error_message: {}'.format(
                         self.player.API.response_headers.get('x-eresult'),
