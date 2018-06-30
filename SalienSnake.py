@@ -118,6 +118,14 @@ class SteamApi:
             }
         )
 
+    def join_boss_zone(self, zone_id):
+        return self.post(
+            self.build_url('ITerritoryControlMinigameService', 'JoinBossZone'), {
+                'zone_position': zone_id,
+                'access_token': self.token
+            }
+        )
+
     def represent_clan(self, clan_id):
         return self.post(
             self.build_url('ITerritoryControlMinigameService', 'RepresentClan'), {
@@ -132,6 +140,16 @@ class SteamApi:
                 'access_token': self.token,
                 'score': score,
                 'language': self.language
+            }
+        )
+
+    def report_boss_damage(self, damage_done, damage_taken, used_healing):
+        return self.post(
+            self.build_url('ITerritoryControlMinigameService', 'ReportBossDamage'), {
+                'access_token': self.token,
+                'use_heal_ability': used_healing,
+                'damage_to_boss': damage_done,
+                'damage_taken': damage_taken
             }
         )
 
@@ -155,6 +173,11 @@ class Instance(Enum):
     planet = 'PLANET'
 
 
+class Type(Enum):
+    boss = True
+    default = False
+
+
 class NamedThread(Thread):
     def __init__(self):
         Thread.__init__(self)
@@ -169,8 +192,9 @@ class NamedThread(Thread):
 
 
 class Commander(NamedThread):
-    _API = SteamApi()
+    API = SteamApi()
 
+    type = None
     planet = None
     zone = None
 
@@ -183,19 +207,23 @@ class Commander(NamedThread):
 
     @staticmethod
     def find_best_planet_and_zone():
-        new_planets = Commander._API.get_planets()
+        new_planets = Commander.API.get_planets()
         planets_info = []
 
         for planet_item in new_planets['response']['planets']:
             if not planet_item['state']['captured']:
-                planets_info.append(Commander._API.get_planet(planet_item['id']))
+                planets_info.append(Commander.API.get_planet(planet_item['id']))
 
         for difficulty in Difficulty:
-            for planet_info in planets_info:
-                for zone_item in planet_info['response']['planets'][0]['zones']:
-                    if not zone_item['captured'] and zone_item['difficulty'] == difficulty.value \
-                            and zone_item['capture_progress'] and zone_item['capture_progress'] < 0.9:
-                        return planet_info['response']['planets'][0], zone_item
+            for type in Type:
+                for planet_info in planets_info:
+                    for zone_item in planet_info['response']['planets'][0]['zones']:
+                        if not zone_item['captured'] and zone_item['difficulty'] == difficulty.value \
+                                and zone_item.get('boss_active', False) == type.value \
+                                and zone_item['capture_progress'] and zone_item['capture_progress'] < 0.9:
+                            return type, planet_info['response']['planets'][0], zone_item
+
+                logger.info('Commander: can\'t get planets with the type of zones {}'.format(type))
 
             logger.info('Commander: can\'t get planets with the complexity level of zones {}'.format(difficulty))
 
@@ -214,7 +242,7 @@ class Commander(NamedThread):
 
             logger.info('Commander: I check the accuracy of my information on zone {}'.format(zone_id))
 
-            updated_planet_info = Commander._API.get_planet(planet_id)
+            updated_planet_info = Commander.API.get_planet(planet_id)
             zone_info = {}
 
             for zone_item in updated_planet_info['response']['planets'][0]['zones']:
@@ -224,7 +252,7 @@ class Commander(NamedThread):
             if zone_info.get('captured', True):
                 logger.info('Commander: Information has become wrong! I give new data...')
 
-                Commander.planet, Commander.zone = Commander.find_best_planet_and_zone()
+                Commander.type, Commander.planet, Commander.zone = Commander.find_best_planet_and_zone()
 
                 logger.info('Commander: New information arrived! Planet {}, zone {} ({}%)!'.format(
                     Commander.planet['id'],
@@ -243,7 +271,7 @@ class Commander(NamedThread):
         while True:
             self.info('I get the optimal planet and landing zone!')
 
-            Commander.planet, Commander.zone = Commander.find_best_planet_and_zone()
+            Commander.type, Commander.planet, Commander.zone = Commander.find_best_planet_and_zone()
 
             self.info('All attack the planet {}, zone {} ({}%)!'.format(
                 Commander.planet['id'],
@@ -254,13 +282,13 @@ class Commander(NamedThread):
             time.sleep(5 * 60)
 
 
-class Salien(NamedThread):
+class Player(NamedThread):
     def __init__(self, token, name, language=None):
         NamedThread.__init__(self)
 
         self.name = name
-        self._API = SteamApi(token, language)
-        self.player = self._API.get_player_info()
+        self.API = SteamApi(token, language)
+        self.player = self.API.get_player_info()
 
     def get_active_planet(self):
         return self.player['response'].get('active_planet')
@@ -277,16 +305,16 @@ class Salien(NamedThread):
 
         self.info('Trying to leave the current {} (#{})...'.format(instance, instance_id))
 
-        self._API.leave_game_instance(instance_id)
+        self.API.leave_game_instance(instance_id)
 
-        x_eresult = int(self._API.response_headers.get('x-eresult', -1))
+        x_eresult = int(self.API.response_headers.get('x-eresult', -1))
         if x_eresult == 1:
             self.info('Successfully left the {} (#{})!'.format(instance, instance_id))
         elif x_eresult == 11:
             raise AttributeError()
         else:
             self.warning('API. LeaveGame. X-eresult: {}; x-error_message: {}'.format(
-                x_eresult, self._API.response_headers.get('x-error_message')))
+                x_eresult, self.API.response_headers.get('x-error_message')))
 
     def leave_current_zone(self):
         zone_id = self.get_active_zone()
@@ -312,20 +340,28 @@ class Salien(NamedThread):
         if current_planet != planet['id']:
             self.leave_current_planet()
 
-            self._API.join_planet(planet['id'])
+            self.API.join_planet(planet['id'])
 
             self.info('Yes, sir! Joined planet #{}'.format(planet['id']))
 
     def join_zone(self, zone):
-        self._API.join_zone(zone['zone_position'])
+        self.API.join_zone(zone['zone_position'])
 
-        if self._API.response_headers['x-eresult'] == '27':
+        if self.API.response_headers['x-eresult'] == '27':
             raise AttributeError()
 
         self.info('Attacking zone {}; {}'.format(
             zone['zone_position'],
             Difficulty(zone['difficulty'])
         ))
+
+    def join_boss_zone(self, zone):
+        self.API.join_boss_zone(zone['zone_position'])
+
+        if self.API.response_headers['x-eresult'] != '1':
+            raise AttributeError()
+
+        self.info('Attacking BOSS zone {}'.format(zone['zone_position']))
 
     def run(self):
         self.leave_current_zone()
@@ -337,64 +373,117 @@ class Salien(NamedThread):
         ))
 
         while True:
-            self.player = self._API.get_player_info()
+            self.player = self.API.get_player_info()
             self.join_planet(Commander.planet)
 
-            try:
-                self.join_zone(Commander.zone)
-            except AttributeError:
-                self.warning('I can\'t attack this zone. It\'s captured!')
+            Game(self).play()
 
-                Commander.check_current_information()
 
-                continue
+class Game:
+    def __init__(self, player):
+        self.player = player
 
-            continue_flag = False
-            for _ in range(110):
-                current_zone = self.get_active_zone_position()
-                if current_zone and str(Commander.zone['zone_position']) != current_zone:
-                    self.info('The current zone is captured. I see no reason to be there. Change of zone...')
+    def play(self):
+        if Commander.type == Type.default:
+            self.start_default_game()
+        elif Commander.type == Type.boss:
+            self.start_boss_game()
 
-                    self.leave_current_zone()
+    def start_default_game(self):
+        try:
+            self.player.join_zone(Commander.zone)
+        except AttributeError:
+            self.player.warning('I can\'t attack this zone. It\'s captured!')
 
-                    continue_flag = True
-                    break
+            Commander.check_current_information()
+            return
 
-                time.sleep(1)
+        for _ in range(110):
+            current_zone = self.player.get_active_zone_position()
+            if current_zone and str(Commander.zone['zone_position']) != current_zone:
+                self.player.info('The current zone is captured. I see no reason to be there. Change of zone...')
 
-            if continue_flag:
-                continue
+                self.player.leave_current_zone()
+                return
 
-            score = 120 * (5 * (2 ** (Commander.zone['difficulty'] - 1)))
+            time.sleep(1)
 
-            try:
-                score_stats = self._API.report_score(score)
+        score = 120 * (5 * (2 ** (Commander.zone['difficulty'] - 1)))
 
-                self.info('Current score = {}/{}; Current level = {}'.format(
-                    score_stats['response']['new_score'],
-                    score_stats['response']['next_level_score'],
-                    score_stats['response']['new_level']
-                ))
-            except KeyError:
-                x_eresult = int(self._API.response_headers.get('x-eresult', -1))
+        try:
+            score_stats = self.player.API.report_score(score)
 
-                if x_eresult == 93:
-                    self.warning('API. ReportScore. Request sent too early.')
-                elif x_eresult == 73:
-                    self.warning('API. ReportScore. Invalid \'score\' value.')
-                elif x_eresult == 42:
-                    self.warning(
-                        'API. ReportScore. Did not have time to send the report '
-                        'or did not attack the zone or zone captured...')
-                elif x_eresult == 27:
-                    self.warning(
-                        'API. ReportScore. Zone Captured! This zone has been recaptured '
-                        'from the Duldrumz by the Steam Community.')
+            self.player.info('Current score = {}/{}; Current level = {}'.format(
+                score_stats['response']['new_score'],
+                score_stats['response']['next_level_score'],
+                score_stats['response']['new_level']
+            ))
+        except KeyError:
+            x_eresult = int(self.player.API.response_headers.get('x-eresult', -1))
+
+            if x_eresult == 93:
+                self.player.warning('API. ReportScore. Request sent too early.')
+            elif x_eresult == 73:
+                self.player.warning('API. ReportScore. Invalid \'score\' value.')
+            elif x_eresult == 42:
+                self.player.warning(
+                    'API. ReportScore. Did not have time to send the report '
+                    'or did not attack the zone or zone captured...')
+            elif x_eresult == 27:
+                self.player.warning(
+                    'API. ReportScore. Zone Captured! This zone has been recaptured '
+                    'from the Duldrumz by the Steam Community.')
+            else:
+                self.player.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
+                    x_eresult, self.player.API.response_headers.get('x-error_message')))
+
+            Commander.check_current_information()
+
+    def start_boss_game(self):
+        try:
+            self.player.join_boss_zone(Commander.zone)
+        except AttributeError:
+            self.player.warning('I can\'t attack boss zone.')
+
+            return
+
+        damage_done = 1
+        damage_taken = 0
+
+        seconds = -1
+        while True:
+            seconds += 1
+            time.sleep(1)
+
+            used_healing = 0
+            if not seconds % 120:
+                used_healing = 1
+
+            if not seconds % 5:
+                try:
+                    response = self.player.API.report_boss_damage(damage_done, damage_taken, used_healing)['response']
+
+                    print(response)     # Someday I'll delete it
+                except AttributeError:
+                    self.player.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
+                        self.player.API.response_headers.get('x-eresult'),
+                        self.player.API.response_headers.get('x-error_message')
+                    ))
                 else:
-                    self.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
-                        x_eresult, self._API.response_headers.get('x-error_message')))
+                    #   nice flood, but need to test fight with boss
+                    if not response.get('boss_status'):
+                        self.player.info('Waiting for the boss to attack...')
+                    elif response.get('game_over'):
+                        self.player.info('Fight with the boss is over!')
 
-                Commander.check_current_information()
+                        # TODO add select of new zone
+                        break
+                    elif response.get('waiting_for_players'):
+                        self.player.info('Waiting for the players!')
+                    else:
+                        self.player.info('BOSS health {}/{}'.format(
+                            response['boss_status']['boss_hp'], response['boss_status']['boss_max_hp']
+                        ))
 
 
 if __name__ == '__main__':
@@ -457,6 +546,6 @@ if __name__ == '__main__':
     while not Commander.planet or not Commander.zone:
         time.sleep(1)
     for name, token in tokens.items():
-        Salien(token, name, args.language).start()
+        Player(token, name, args.language).start()
 
         logger.info('Thread \'{}\' has started!'.format(name))
