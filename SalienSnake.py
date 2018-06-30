@@ -456,6 +456,10 @@ class Game:
             time.sleep(5)
         except AttributeError:
             self.player.warning('I can\'t attack boss zone.')
+            self.player.warning('API. JoinBossZone. X-eresult: {}; x-error_message: {}'.format(
+                self.player.API.response_headers.get('x-eresult'),
+                self.player.API.response_headers.get('x-error_message')
+            ))
 
             return
 
