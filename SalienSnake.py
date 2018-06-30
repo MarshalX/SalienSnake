@@ -218,10 +218,13 @@ class Commander(NamedThread):
             for type in Type:
                 for planet_info in planets_info:
                     for zone_item in planet_info['response']['planets'][0]['zones']:
-                        if not zone_item['captured'] and zone_item['difficulty'] == difficulty.value \
-                                and zone_item.get('boss_active', False) == type.value \
-                                and zone_item['capture_progress'] and zone_item['capture_progress'] < 0.9:
-                            return type, planet_info['response']['planets'][0], zone_item
+                        if type == Type.boss:
+                            if zone_item.get('boss_active', False):
+                                return Type.boss, planet_info['response']['planets'][0], zone_item
+                        else:
+                            if not zone_item['captured'] and zone_item['difficulty'] == difficulty.value \
+                                    and zone_item['capture_progress'] and zone_item['capture_progress'] < 0.9:
+                                return type, planet_info['response']['planets'][0], zone_item
 
                 logger.info('Commander: can\'t get planets with the type of zones {}'.format(type))
 
@@ -458,12 +461,13 @@ class Game:
             used_healing = 0
             if not seconds % 120:
                 used_healing = 1
+                self.player.info('Used the restoration of health!')
 
             if not seconds % 5:
                 try:
                     response = self.player.API.report_boss_damage(damage_done, damage_taken, used_healing)['response']
 
-                    print(response)     # Someday I'll delete it
+                    #print(response)     # Someday I'll delete it
                 except AttributeError:
                     self.player.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
                         self.player.API.response_headers.get('x-eresult'),
