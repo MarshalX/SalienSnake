@@ -214,19 +214,19 @@ class Commander(NamedThread):
             if not planet_item['state']['captured']:
                 planets_info.append(Commander.API.get_planet(planet_item['id']))
 
-        for difficulty in Difficulty:
-            for type in Type:
-                for planet_info in planets_info:
-                    for zone_item in planet_info['response']['planets'][0]['zones']:
-                        if type == Type.boss:
-                            if zone_item.get('boss_active', False):
-                                return Type.boss, planet_info['response']['planets'][0], zone_item
-                        else:
-                            if not zone_item['captured'] and zone_item['difficulty'] == difficulty.value \
-                                    and zone_item['capture_progress'] and zone_item['capture_progress'] < 0.9:
-                                return type, planet_info['response']['planets'][0], zone_item
+        for planet_info in planets_info:
+            for zone_item in planet_info['response']['planets'][0]['zones']:
+                    if zone_item.get('boss_active', False):
+                        return Type.boss, planet_info['response']['planets'][0], zone_item
 
-                logger.info('Commander: can\'t get planets with the type of zones {}'.format(type))
+        logger.info('Commander: can\'t get planets with the type of zones {}'.format(Type.boss))
+
+        for difficulty in Difficulty:
+            for planet_info in planets_info:
+                for zone_item in planet_info['response']['planets'][0]['zones']:
+                    if not zone_item['captured'] and zone_item['difficulty'] == difficulty.value \
+                            and zone_item['capture_progress'] and zone_item['capture_progress'] < 0.9:
+                        return Type.default, planet_info['response']['planets'][0], zone_item
 
             logger.info('Commander: can\'t get planets with the complexity level of zones {}'.format(difficulty))
 
@@ -252,7 +252,8 @@ class Commander(NamedThread):
                 if zone_item['zone_position'] == zone_id:
                     zone_info = zone_item
 
-            if zone_info.get('captured', True):
+            if (Commander.type == Type.default and zone_info.get('captured', True)) \
+                    or (Commander.type == Type.boss and not zone_info.get('boss_active', False)):
                 logger.info('Commander: Information has become wrong! I give new data...')
 
                 Commander.type, Commander.planet, Commander.zone = Commander.find_best_planet_and_zone()
@@ -445,6 +446,8 @@ class Game:
     def start_boss_game(self):
         try:
             self.player.join_boss_zone(Commander.zone)
+
+            time.sleep(5)
         except AttributeError:
             self.player.warning('I can\'t attack boss zone.')
 
@@ -460,34 +463,30 @@ class Game:
 
             used_healing = 0
             if not seconds % 120:
-                used_healing = 1
                 self.player.info('Used the restoration of health!')
+                used_healing = 1
 
             if not seconds % 5:
-                try:
-                    response = self.player.API.report_boss_damage(damage_done, damage_taken, used_healing)['response']
+                response = self.player.API.report_boss_damage(damage_done, damage_taken, used_healing)['response']
 
-                    #print(response)     # Someday I'll delete it
-                except AttributeError:
-                    self.player.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
-                        self.player.API.response_headers.get('x-eresult'),
-                        self.player.API.response_headers.get('x-error_message')
-                    ))
+                x_eresult = int(self.player.API.response_headers.get('x-eresult', -1))
+                if x_eresult != 1:
+                    self.player.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'
+                                        .format(x_eresult, self.player.API.response_headers.get('x-error_message')))
+
+                if not response.get('boss_status'):
+                    self.player.info('Waiting for the boss to attack...')
+                elif response.get('game_over'):
+                    self.player.info('Fight with the boss is over!')
+
+                    Commander.check_current_information()
+                    break
+                elif response.get('waiting_for_players'):
+                    self.player.info('Waiting for the players!')
                 else:
-                    #   nice flood, but need to test fight with boss
-                    if not response.get('boss_status'):
-                        self.player.info('Waiting for the boss to attack...')
-                    elif response.get('game_over'):
-                        self.player.info('Fight with the boss is over!')
-
-                        # TODO add select of new zone
-                        break
-                    elif response.get('waiting_for_players'):
-                        self.player.info('Waiting for the players!')
-                    else:
-                        self.player.info('BOSS health {}/{}'.format(
-                            response['boss_status']['boss_hp'], response['boss_status']['boss_max_hp']
-                        ))
+                    self.player.info('BOSS health {}/{}'.format(
+                        response['boss_status']['boss_hp'], response['boss_status']['boss_max_hp']
+                    ))
 
 
 if __name__ == '__main__':
