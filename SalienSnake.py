@@ -474,13 +474,15 @@ class Game:
                     self.player.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'
                                         .format(x_eresult, self.player.API.response_headers.get('x-error_message')))
 
+                    return
+
                 if not response.get('boss_status'):
                     self.player.info('Waiting for the boss to attack...')
                 elif response.get('game_over'):
                     self.player.info('Fight with the boss is over!')
 
                     Commander.check_current_information()
-                    break
+                    return
                 elif response.get('waiting_for_players'):
                     self.player.info('Waiting for the players!')
                 else:
