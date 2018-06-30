@@ -174,8 +174,8 @@ class Instance(Enum):
 
 
 class Type(Enum):
-    boss = True
-    default = False
+    boss = 4
+    default = 3
 
 
 class NamedThread(Thread):
@@ -367,6 +367,12 @@ class Player(NamedThread):
 
         self.info('Attacking BOSS zone {}'.format(zone['zone_position']))
 
+    def report_boss_damage(self, damage_done, damage_taken, used_healing):
+        self.API.report_boss_damage(damage_done, damage_taken, used_healing)
+
+        if self.API.response_headers['x-eresult'] != '1':
+            raise AttributeError()
+
     def run(self):
         self.leave_current_zone()
 
@@ -467,28 +473,29 @@ class Game:
                 used_healing = 1
 
             if not seconds % 5:
-                response = self.player.API.report_boss_damage(damage_done, damage_taken, used_healing)['response']
-
-                x_eresult = int(self.player.API.response_headers.get('x-eresult', -1))
-                if x_eresult != 1:
-                    self.player.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'
-                                        .format(x_eresult, self.player.API.response_headers.get('x-error_message')))
-
-                    return
-
-                if not response.get('boss_status'):
-                    self.player.info('Waiting for the boss to attack...')
-                elif response.get('game_over'):
-                    self.player.info('Fight with the boss is over!')
-
-                    Commander.check_current_information()
-                    return
-                elif response.get('waiting_for_players'):
-                    self.player.info('Waiting for the players!')
-                else:
-                    self.player.info('BOSS health {}/{}'.format(
-                        response['boss_status']['boss_hp'], response['boss_status']['boss_max_hp']
+                try:
+                    response = self.player.report_boss_damage(damage_done, damage_taken, used_healing)['response']
+                except AttributeError:
+                    self.player.warning('API. ReportBossDamage. X-eresult: {}; x-error_message: {}'.format(
+                        self.player.API.response_headers.get('x-eresult'),
+                        self.player.API.response_headers.get('x-error_message')
                     ))
+
+                    return
+                else:
+                    if not response.get('boss_status'):
+                        self.player.info('Waiting for the boss to attack...')
+                    elif response.get('game_over'):
+                        self.player.info('Fight with the boss is over!')
+
+                        Commander.check_current_information()
+                        return
+                    elif response.get('waiting_for_players'):
+                        self.player.info('Waiting for the players!')
+                    else:
+                        self.player.info('BOSS health {}/{}'.format(
+                            response['boss_status']['boss_hp'], response['boss_status']['boss_max_hp']
+                        ))
 
 
 if __name__ == '__main__':
