@@ -378,7 +378,14 @@ class Player(NamedThread):
     def report_boss_damage(self, damage_done, damage_taken, used_healing):
         response = self.API.report_boss_damage(damage_done, damage_taken, used_healing)
 
-        if self.API.response_headers['x-eresult'] != '1':
+        x_eresult = int(self.API.response_headers.get('x-eresult', -1))
+        if x_eresult == 11:
+            self.info('The boss killed you! Restarting...')
+
+            raise AttributeError()
+        elif x_eresult != 1:
+            self.warning('API. ReportBossDamage. X-eresult: {}; x-error_message: {}'
+                         .format(x_eresult, self.API.response_headers.get('x-error_message')))
             raise AttributeError()
 
         return response['response']
@@ -486,11 +493,6 @@ class Game:
                 try:
                     response = self.player.report_boss_damage(damage_done, damage_taken, used_healing)
                 except AttributeError:
-                    self.player.warning('API. ReportBossDamage. X-eresult: {}; x-error_message: {}'.format(
-                        self.player.API.response_headers.get('x-eresult'),
-                        self.player.API.response_headers.get('x-error_message')
-                    ))
-
                     return
                 else:
                     if not response.get('boss_status'):
