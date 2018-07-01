@@ -225,7 +225,7 @@ class Commander(NamedThread):
             for planet_info in planets_info:
                 for zone_item in planet_info['response']['planets'][0]['zones']:
                     if not zone_item['captured'] and zone_item['difficulty'] == difficulty.value \
-                            and zone_item['capture_progress'] and zone_item['capture_progress'] < 0.9:
+                            and zone_item.get('capture_progress', 0) and zone_item.get('capture_progress', 0) < 0.9:
                         return Type.default, planet_info['response']['planets'][0], zone_item
 
             logger.info('Commander: can\'t get planets with the complexity level of zones {}'.format(difficulty))
