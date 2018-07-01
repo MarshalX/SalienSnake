@@ -362,10 +362,18 @@ class Player(NamedThread):
     def join_boss_zone(self, zone):
         self.API.join_boss_zone(zone['zone_position'])
 
-        if self.API.response_headers['x-eresult'] != '1':
-            raise AttributeError()
+        x_eresult = int(self.API.response_headers.get('x-eresult', -1))
+        if x_eresult == 1:
+            self.info('Attacking BOSS zone {}'.format(zone['zone_position']))
+        elif x_eresult == 8:
+            self.info('Can\'t join to the boss zone because it\'s not a boos zone')
 
-        self.info('Attacking BOSS zone {}'.format(zone['zone_position']))
+            raise AttributeError()
+        elif x_eresult == 11:
+            self.info('Already in the boss zone #{}'.format(zone['zone_position']))
+        elif x_eresult != 1:
+            self.warning('API. JoinBossZone. X-eresult: {}; x-error_message: {}'
+                         .format(x_eresult, self.API.response_headers.get('x-error_message')))
 
     def report_boss_damage(self, damage_done, damage_taken, used_healing):
         response = self.API.report_boss_damage(damage_done, damage_taken, used_healing)
@@ -457,11 +465,7 @@ class Game:
 
             time.sleep(5)
         except AttributeError:
-            self.player.warning('I can\'t attack boss zone.')
-            self.player.warning('API. JoinBossZone. X-eresult: {}; x-error_message: {}'.format(
-                self.player.API.response_headers.get('x-eresult'),
-                self.player.API.response_headers.get('x-error_message')
-            ))
+            Commander.check_current_information()
 
             return
 
