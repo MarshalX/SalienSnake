@@ -2,6 +2,7 @@
 A simple bot written on Python for the Steam 2018 summer sale.
 
 # Features:
+* priority search for bosses and battle with them
 * search for high-level zones on all planets;
 * maximize experience;
 * cross-platform;
