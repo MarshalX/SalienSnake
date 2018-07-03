@@ -1,1 +1,1 @@
-worker: python3 SalienSnake.py [--token <token>] [--file <filename with extension>] [--planet <planet id>] [--language <language>] [--list-planets] [--debug] [--disable-boss-priority] [--flood-mode]
+worker: python3 SalienSnake.py [--token <token>] [--file <filename with extension>] [--language <language>] [--list-planets] [--debug]

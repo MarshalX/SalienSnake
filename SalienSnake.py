@@ -283,7 +283,7 @@ class Commander(NamedThread):
                 int(Commander.zone['capture_progress'] * 100)
             ))
 
-            time.sleep(5 * 60)
+            time.sleep(60)
 
 
 class Player(NamedThread):
@@ -375,6 +375,34 @@ class Player(NamedThread):
             self.warning('API. JoinBossZone. X-eresult: {}; x-error_message: {}'
                          .format(x_eresult, self.API.response_headers.get('x-error_message')))
 
+    def report_score(self, score):
+        response = self.API.report_score(score)
+
+        x_eresult = int(self.API.response_headers.get('x-eresult', -1))
+
+        if x_eresult == 1:
+            return response['response']
+
+        if x_eresult == 93:
+            self.warning('API. ReportScore. Request sent too early.')
+        elif x_eresult == 73:
+            self.warning('API. ReportScore. Invalid \'score\' value.')
+        elif x_eresult == 42:
+            self.warning(
+                'API. ReportScore. Did not have time to send the report '
+                'or did not attack the zone or zone captured...')
+
+            Commander.check_current_information()
+        elif x_eresult == 27:
+            self.warning(
+                'API. ReportScore. Zone Captured! This zone has been recaptured '
+                'from the Duldrumz by the Steam Community.')
+
+            Commander.check_current_information()
+        else:
+            self.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
+                x_eresult, self.API.response_headers.get('x-error_message')))
+
     def report_boss_damage(self, damage_done, damage_taken, used_healing):
         response = self.API.report_boss_damage(damage_done, damage_taken, used_healing)
 
@@ -395,7 +423,7 @@ class Player(NamedThread):
 
         self.info('Current score = {}/{}; Current Level = {}'.format(
             self.player['response']['score'],
-            self.player['response']['next_level_score'],
+            self.player['response'].get('next_level_score', 'MAX LVL(25)'),
             self.player['response']['level']
         ))
 
@@ -437,34 +465,13 @@ class Game:
 
         score = 120 * (5 * (2 ** (Commander.zone['difficulty'] - 1)))
 
-        try:
-            score_stats = self.player.API.report_score(score)
-
+        report_score = self.player.report_score(score)
+        if report_score:
             self.player.info('Current score = {}/{}; Current level = {}'.format(
-                score_stats['response']['new_score'],
-                score_stats['response']['next_level_score'],
-                score_stats['response']['new_level']
+                report_score['new_score'],
+                report_score.get('next_level_score', 'MAX LVL(25)'),
+                report_score['new_level']
             ))
-        except KeyError:
-            x_eresult = int(self.player.API.response_headers.get('x-eresult', -1))
-
-            if x_eresult == 93:
-                self.player.warning('API. ReportScore. Request sent too early.')
-            elif x_eresult == 73:
-                self.player.warning('API. ReportScore. Invalid \'score\' value.')
-            elif x_eresult == 42:
-                self.player.warning(
-                    'API. ReportScore. Did not have time to send the report '
-                    'or did not attack the zone or zone captured...')
-            elif x_eresult == 27:
-                self.player.warning(
-                    'API. ReportScore. Zone Captured! This zone has been recaptured '
-                    'from the Duldrumz by the Steam Community.')
-            else:
-                self.player.warning('API. ReportScore. X-eresult: {}; x-error_message: {}'.format(
-                    x_eresult, self.player.API.response_headers.get('x-error_message')))
-
-            Commander.check_current_information()
 
     def start_boss_game(self):
         try:
